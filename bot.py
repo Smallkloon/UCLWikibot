@@ -174,10 +174,9 @@ async def on_message(message: discord.Message):
     if not query:
         embed = discord.Embed(
             title=EMBED_USAGE_TITLE,
-            description=EMBED_USAGE_DESC,
+            description=EMBED_USAGE_DESC + f"\n\n{EMBED_FOOTER}",
             color=COLOR_RESULTS,
         )
-        embed.set_footer(text=EMBED_FOOTER)
         await message.channel.send(embed=embed)
         return
 
@@ -197,22 +196,21 @@ async def on_message(message: discord.Message):
         if total > MAX_RESULTS:
             description += f"\n\n*...and {total - MAX_RESULTS} more. Try a more specific search.*"
 
+        description += f"\n\n{total} matches for \"{query}\"\n{EMBED_FOOTER}"
         embed = discord.Embed(
             title=EMBED_RESULTS_TITLE,
             description=description,
             color=COLOR_RESULTS,
         )
-        embed.set_footer(text=f"{EMBED_FOOTER} • {total} matches for \"{query}\"")
         await message.channel.send(embed=embed)
         return
     
     # no match found
     embed = discord.Embed(
         title=EMBED_NONE_TITLE,
-        description=f"No pages found matching **{query}**.",
+        description=f"No pages found matching **{query}**.\n\n0 matches for \"{query}\"\n{EMBED_FOOTER}",
         color=COLOR_NONE,
     )
-    embed.set_footer(text=EMBED_FOOTER)
     await message.channel.send(embed=embed)
 
 client.run(DISCORD_TOKEN)
