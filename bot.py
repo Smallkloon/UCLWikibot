@@ -6,6 +6,7 @@ import re
 import asyncio
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import tasks
 
 # cf (formatted nicely yayy thank you copilot inline suggestions)
@@ -15,7 +16,8 @@ WIKI_API            = f"{WIKI_BASE}/w/api.php"
 WIKI_PAGE_URL       = f"{WIKI_BASE}/wiki/"
 
 # Bot (time in mins)
-COMMAND_PREFIX      = ".wiki"
+COMMAND_NAME        = "wiki"
+COMMAND_DESC        = "Search the ULTRAKILL Custom Levels Wiki"
 CACHE_INTERVAL      = 60 # might be good to run some experiments on optimal cache interval
 MAX_RESULTS         = 10    
 CATEGORIES_PER_PAGE = 5         
@@ -29,7 +31,7 @@ EMBED_RESULTS_TITLE = "Wiki Search Results"
 EMBED_NONE_TITLE    = "No Results"
 EMBED_USAGE_TITLE   = "How to Use This Command"
 EMBED_USAGE_DESC    = (
-    f"`{COMMAND_PREFIX} [page name]`\n"
+    f"`/{COMMAND_NAME} [page name]`\n"
     "Searches the ULTRAKILL Custom Levels Wiki for a matching page.\n\n"
     "• Exact and partial matches supported\n"
     "• Spaces and capitalization are ignored"
@@ -145,9 +147,17 @@ def search(query: str) -> list[dict]:
 
 # Discord client
 
-intents = discord.Intents.default()
-intents.message_content = True
-client = discord.Client(intents=intents)
+class WikiClient(discord.Client):
+    def __init__(self):
+        # slash commands need no privileged intents (message_content was revoked)
+        super().__init__(intents=discord.Intents.default())
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()  # register /wiki with Discord
+
+client = WikiClient()
+tree = client.tree
 
 
 @tasks.loop(minutes=CACHE_INTERVAL)
@@ -164,22 +174,29 @@ async def on_ready():
         cache_refresh_task.start()
 
 # kinda no comments in this entire project but "the code speaks for itself"
-@client.event
-async def on_message(message: discord.Message):
-    if message.author.bot: return
-    if not message.content.lower().startswith(COMMAND_PREFIX.lower()): return
-    query = message.content[len(COMMAND_PREFIX):].strip()
+async def respond(interaction: discord.Interaction, embed: discord.Embed):
+    """Reply directly, or as a followup if the interaction was deferred."""
+    if interaction.response.is_done(): await interaction.followup.send(embed=embed)
+    else: await interaction.response.send_message(embed=embed)
 
-    # ".wiki" -> show help
+
+@tree.command(name=COMMAND_NAME, description=COMMAND_DESC)
+@app_commands.describe(query="Page name to search for")
+async def wiki(interaction: discord.Interaction, query: str | None = None):
+    query = (query or "").strip()
+
+    # "/wiki" -> show help
     if not query:
         embed = discord.Embed(
             title=EMBED_USAGE_TITLE,
             description=EMBED_USAGE_DESC + f"\n\n{EMBED_FOOTER}",
             color=COLOR_RESULTS,
         )
-        await message.channel.send(embed=embed)
+        await respond(interaction, embed)
         return
 
+    # Discord drops interactions not answered within 3s, so defer while the first cache load runs
+    if not cache_ready.is_set(): await interaction.response.defer()
     await cache_ready.wait()  # block until the cache has been populated at least once
     results = search(query)
 
@@ -202,15 +219,15 @@ async def on_message(message: discord.Message):
             description=description,
             color=COLOR_RESULTS,
         )
-        await message.channel.send(embed=embed)
+        await respond(interaction, embed)
         return
-    
+
     # no match found
     embed = discord.Embed(
         title=EMBED_NONE_TITLE,
         description=f"No pages found matching **{query}**.\n\n0 matches for \"{query}\"\n{EMBED_FOOTER}",
         color=COLOR_NONE,
     )
-    await message.channel.send(embed=embed)
+    await respond(interaction, embed)
 
 client.run(DISCORD_TOKEN)
